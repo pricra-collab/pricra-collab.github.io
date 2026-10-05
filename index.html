@@ -1,0 +1,491 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Seguimiento de Asistencia - Facultad de Ingeniería</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- SheetJS para Excel -->
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <!-- Firebase App y Database SDKs para sincronización en tiempo real -->
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+</head>
+<body class="bg-slate-100 min-h-screen font-sans p-3 md:p-6 text-slate-800">
+
+    <div class="max-w-7xl mx-auto space-y-5">
+        
+        <!-- Encabezado Principal -->
+        <header class="bg-indigo-950 text-white p-5 rounded-2xl shadow-xl flex flex-col md:flex-row justify-between items-center gap-4">
+            <div>
+                <div class="flex items-center gap-2">
+                    <span class="bg-indigo-700 text-indigo-100 text-xs font-bold px-2.5 py-1 rounded-full uppercase tracking-wider">Facultad de Ingeniería</span>
+                    <span class="text-xs text-indigo-300">| Control de Horarios</span>
+                </div>
+                <h1 class="text-2xl md:text-3xl font-extrabold mt-1">Verificación de Asistencia Docente</h1>
+            </div>
+
+            <!-- Indicador de Rol y Acciones de Administrador -->
+            <div class="flex flex-wrap items-center gap-3 w-full md:w-auto justify-end">
+                <!-- Badge Estado de Permiso -->
+                <div id="badgeRol" class="px-3 py-1.5 rounded-xl text-xs font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 flex items-center gap-1.5">
+                    👁️ Modo Visor (Solo Lectura)
+                </div>
+
+                <!-- Botón Login Admin -->
+                <button id="btnAdminLogin" onclick="autenticarAdmin()" class="bg-amber-500 hover:bg-amber-400 text-indigo-950 font-bold py-2 px-3.5 rounded-xl transition shadow text-xs flex items-center gap-1">
+                    🔑 Ingresar como Admin
+                </button>
+                <button id="btnAdminLogout" onclick="cerrarSesionAdmin()" class="hidden bg-slate-700 hover:bg-slate-600 text-white font-semibold py-2 px-3.5 rounded-xl transition shadow text-xs">
+                    🚪 Salir Admin
+                </button>
+
+                <!-- Botones Cargar / Exportar -->
+                <label id="lblCargarExcel" class="hidden text-center bg-indigo-700 hover:bg-indigo-600 text-white font-medium py-2 px-3.5 rounded-xl cursor-pointer transition shadow text-xs border border-indigo-500">
+                    📂 Cargar Excel
+                    <input type="file" id="excelFileInput" accept=".xlsx, .xls" class="hidden" onchange="cargarExcel(event)">
+                </label>
+                <button onclick="exportarReporteExcel()" class="bg-emerald-600 hover:bg-emerald-500 text-white font-medium py-2 px-3.5 rounded-xl transition shadow text-xs">
+                    📥 Exportar Excel
+                </button>
+            </div>
+        </header>
+
+        <!-- Barra de Selección de Fecha y Filtros -->
+        <section class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 items-center">
+            
+            <!-- Desplegable de Días/Fechas -->
+            <div>
+                <label class="block text-xs font-bold text-slate-500 uppercase mb-1">📅 Seleccionar Día / Fecha:</label>
+                <select id="selectFecha" onchange="cambiarFecha()" class="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-xl font-semibold text-indigo-900 focus:ring-2 focus:ring-indigo-500 focus:outline-none text-sm">
+                    <!-- Se llena dinámicamente -->
+                </select>
+            </div>
+
+            <!-- Búsqueda por Docente o Programa -->
+            <div>
+                <label class="block text-xs font-bold text-slate-500 uppercase mb-1">🔍 Buscar Docente / Programa:</label>
+                <input type="text" id="searchInput" oninput="aplicarFiltros()" placeholder="Ej. Arquitectura, Erika..." class="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+            </div>
+
+            <!-- Filtro por Estado -->
+            <div>
+                <label class="block text-xs font-bold text-slate-500 uppercase mb-1">📌 Estado de Asistencia:</label>
+                <select id="filterStatus" onchange="aplicarFiltros()" class="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                    <option value="todos">Todos los estados</option>
+                    <option value="Asistió">✅ Asistió</option>
+                    <option value="Tardanza">⚠️ Tardanza</option>
+                    <option value="Falta">❌ Falta / Ausente</option>
+                    <option value="Pendiente">⏳ Pendiente</option>
+                </select>
+            </div>
+
+            <!-- Toggle: Solo docentes programados -->
+            <div class="flex items-center pt-2 sm:pt-4">
+                <label class="relative inline-flex items-center cursor-pointer">
+                    <input type="checkbox" id="checkSoloProgramados" checked onchange="aplicarFiltros()" class="sr-only peer">
+                    <div class="w-11 h-6 bg-slate-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
+                    <span class="ml-3 text-xs font-semibold text-slate-700">Ver solo programados en el día</span>
+                </label>
+            </div>
+        </section>
+
+        <!-- Tarjetas de Resumen Estadístico del Día -->
+        <section class="grid grid-cols-2 sm:grid-cols-5 gap-3">
+            <div class="bg-white p-3.5 rounded-xl border border-slate-200 shadow-sm text-center">
+                <p class="text-xs text-slate-500 font-medium">Programados</p>
+                <p id="statProgramados" class="text-2xl font-bold text-slate-800">0</p>
+            </div>
+            <div class="bg-emerald-50 p-3.5 rounded-xl border border-emerald-200 text-center">
+                <p class="text-xs text-emerald-600 font-semibold">Asistieron</p>
+                <p id="statAsistio" class="text-2xl font-bold text-emerald-700">0</p>
+            </div>
+            <div class="bg-amber-50 p-3.5 rounded-xl border border-amber-200 text-center">
+                <p class="text-xs text-amber-600 font-semibold">Tardanzas</p>
+                <p id="statTardanza" class="text-2xl font-bold text-amber-700">0</p>
+            </div>
+            <div class="bg-rose-50 p-3.5 rounded-xl border border-rose-200 text-center">
+                <p class="text-xs text-rose-600 font-semibold">Faltas</p>
+                <p id="statFalta" class="text-2xl font-bold text-rose-700">0</p>
+            </div>
+            <div class="bg-slate-100 p-3.5 rounded-xl border border-slate-300 text-center col-span-2 sm:col-span-1">
+                <p class="text-xs text-slate-600 font-semibold">Pendientes</p>
+                <p id="statPendiente" class="text-2xl font-bold text-slate-700">0</p>
+            </div>
+        </section>
+
+        <!-- Tabla de Asistencia -->
+        <main class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+            <div class="overflow-x-auto">
+                <table class="w-full text-left border-collapse">
+                    <thead class="bg-slate-900 text-slate-200 text-xs uppercase tracking-wider">
+                        <tr>
+                            <th class="p-4 w-12 text-center">#</th>
+                            <th class="p-4">Docente</th>
+                            <th class="p-4">Programa Académico</th>
+                            <th class="p-4">Horario del Día</th>
+                            <th class="p-4 text-center w-48">Checklist / Estado</th>
+                            <th class="p-4">Comentarios / Observaciones (Inasistencia o Tardanza)</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tablaCuerpo" class="divide-y divide-slate-200 text-sm">
+                        <!-- Carga dinámica -->
+                    </tbody>
+                </table>
+            </div>
+
+            <div id="mensajeVacio" class="p-12 text-center text-slate-400 hidden">
+                <p class="text-base font-semibold">No hay registros que coincidan con los filtros seleccionados.</p>
+            </div>
+        </main>
+
+    </div>
+
+    <script>
+        // --- CONFIGURACIÓN DE SEGURIDAD ---
+        const CLAVE_ADMIN = "admin123"; // 🔑 Modifica esta contraseña por la que desees utilizar
+        let esAdmin = false;
+
+        // --- OPCIONAL: Sincronización remota multi-dispositivo vía Firebase ---
+        // Para habilitar sincronización en tiempo real entre distintos teléfonos/PCs a través de Internet:
+        // Crea una base de datos gratuita en Firebase Console (https://console.firebase.google.com/) y pega tus credenciales aquí:
+        const firebaseConfig = {
+            // apiKey: "TU_API_KEY",
+            // authDomain: "TU_PROYECTO.firebaseapp.com",
+            // databaseURL: "https://TU_PROYECTO-default-rtdb.firebaseio.com",
+            // projectId: "TU_PROYECTO",
+        };
+
+        let dbRef = null;
+        if (firebaseConfig.databaseURL) {
+            firebase.initializeApp(firebaseConfig);
+            dbRef = firebase.database().ref("asistencia_facultad");
+            dbRef.on("value", (snapshot) => {
+                const val = snapshot.val();
+                if (val) {
+                    registroAsistencia = val;
+                    aplicarFiltros();
+                }
+            });
+        }
+
+        // Canal de sincronización local instantáneo (para pruebas multitab en un mismo equipo)
+        const broadcastChannel = new BroadcastChannel('asistencia_realtime_sync');
+        broadcastChannel.onmessage = (event) => {
+            if (event.data && event.data.registroAsistencia) {
+                registroAsistencia = event.data.registroAsistencia;
+                aplicarFiltros();
+            }
+        };
+
+        // Fechas del Excel
+        const fechasLista = [
+            "SÁB 03/10", "DOM 04/10", "SÁB 10/10", "DOM 11/10", "SÁB 17/10", "DOM 18/10",
+            "SÁB 24/10", "DOM 25/10", "SÁB 31/10", "DOM 01/11", "SÁB 07/11", "DOM 08/11",
+            "SÁB 14/11", "DOM 15/11", "SÁB 21/11", "DOM 22/11", "SÁB 28/11", "DOM 29/11",
+            "SÁB 05/12", "DOM 06/12", "SÁB 12/12", "DOM 13/12", "SÁB 19/12", "DOM 20/12",
+            "SÁB 26/12", "DOM 27/12"
+        ];
+
+        // Base de datos de docentes extraída de tu Excel
+        let docentesData = [
+            { id: 1, nombre: "Erika Condor Aldana", programa: "Arquitectura", diario: "08:00 a.m. - 05:00 p.m.", horarios: { "SÁB 10/10": "9:00 am - 12:00 pm", "SÁB 24/10": "3:00 pm - 6: 00 pm", "SÁB 07/11": "3:00 pm - 6: 00 pm", "SÁB 21/11": "3:00 pm - 6: 00 pm", "SÁB 05/12": "3:00 pm - 6: 00 pm" } },
+            { id: 2, nombre: "Nelida Tantavilca Martinez", programa: "Ingeniería de Minas", diario: "08:00 a.m. - 05:00 p.m.", horarios: { "SÁB 03/10": "3:00 pm - 6: 00 pm", "SÁB 17/10": "3:00 pm - 6: 00 pm", "SÁB 31/10": "3:00 pm - 6: 00 pm", "SÁB 14/11": "3:00 pm - 6: 00 pm", "SÁB 28/11": "3:00 pm - 6: 00 pm" } },
+            { id: 3, nombre: "Luis Ruben Carrasco Contreras", programa: "Ingeniería de Minas", diario: "08:00 a.m. - 05:00 p.m.", horarios: { "DOM 11/10": "8:00 am - 11: 00 am", "DOM 25/10": "8:00 am - 11: 00 am", "DOM 08/11": "8:00 am - 11: 00 am", "DOM 22/11": "8:00 am - 11: 00 am", "DOM 06/12": "8:00 am - 11: 00 am" } },
+            { id: 4, nombre: "Javier Romero Meneses", programa: "Ingeniería Industrial", diario: "08:00 a.m. - 05:00 p.m.", horarios: {} },
+            { id: 5, nombre: "Jeysi Kathleen Ochoa Laguna", programa: "Ingeniería Civil", diario: "08:00 a.m. - 05:00 p.m.", horarios: { "SÁB 03/10": "10:00 a.m. - 1:00 pm", "SÁB 24/10": "10:00 a.m. - 1:00 pm", "SÁB 14/11": "10:00 a.m. - 1:00 pm" } },
+            { id: 6, nombre: "Olga Primavera Huari Huaman", programa: "Ingeniería Ambiental", diario: "08:00 a.m. - 05:00 p.m.", horarios: { "DOM 04/10": "8 am - 1 pm", "DOM 18/10": "8 am - 1 pm", "DOM 01/11": "8 am - 1 pm", "DOM 15/11": "8 am - 1 pm", "DOM 29/11": "8 am - 1 pm", "DOM 13/12": "8 am - 1 pm" } },
+            { id: 7, nombre: "Jose Vladimir Cornejo Tueros", programa: "Ingeniería Ambiental", diario: "08:00 a.m. - 05:00 p.m.", horarios: { "DOM 11/10": "8 am - 1 pm", "DOM 25/10": "8 am - 1 pm", "DOM 08/11": "8 am - 1 pm", "DOM 22/11": "8 am - 1 pm", "DOM 06/12": "8 am - 1 pm" } },
+            { id: 8, nombre: "Jhonatan Seeler Arteaga Rojas", programa: "Ingeniería Civil", diario: "08:00 a.m. - 05:00 p.m.", horarios: { "SÁB 03/10": "2 pm - 3.30 pm", "SÁB 10/10": "2 pm - 3.30 pm", "SÁB 17/10": "2 pm - 3.30 pm", "SÁB 24/10": "2 pm - 3.30 pm", "SÁB 31/10": "2 pm - 3.30 pm", "SÁB 07/11": "2 pm - 3.30 pm" } },
+            { id: 9, nombre: "Gavi Mallaupoma Franco", programa: "Ingeniería Civil", diario: "08:00 a.m. - 05:00 p.m.", horarios: {} },
+            { id: 10, nombre: "Pamela Lucia Ricra Huaman", programa: "Ingeniería Industrial", diario: "08:00 a.m. - 05:00 p.m.", horarios: { "SÁB 03/10": "10:20 a.m. - 01:15 p.m.", "SÁB 24/10": "10:20 a.m. - 01:15 p.m.", "SÁB 14/11": "10:20 a.m. - 01:15 p.m.", "SÁB 05/12": "10:20 a.m. - 01:15 p.m." } },
+            { id: 11, nombre: "Aris Malca Morales", programa: "Ingeniería Empresarial", diario: "08:00 a.m. - 05:00 p.m.", horarios: { "SÁB 10/10": "9:00 am - 1:00 pm", "SÁB 24/10": "9:00 am - 1:00 pm", "SÁB 14/11": "9:00 am - 1:00 pm", "SÁB 05/12": "9:00 am - 1:00 pm" } },
+            { id: 12, nombre: "Cristhian Johel Aliaga Adauto", programa: "Ingeniería Eléctrica", diario: "08:00 a.m. - 05:00 p.m.", horarios: { "DOM 04/10": "10:20 a.m. - 01:15 p.m.", "DOM 25/10": "10:20 a.m. - 01:15 p.m.", "DOM 15/11": "10:20 a.m. - 01:15 p.m.", "DOM 06/12": "10:20 a.m. - 01:15 p.m." } },
+            { id: 13, nombre: "Maria Gabriela Camborda Zamudio", programa: "Ingeniería de Sistemas e Informática", diario: "08:00 a.m. - 05:00 p.m.", horarios: { "DOM 11/10": "9:00 a.m. - 12:00", "DOM 25/10": "9:00 a.m. - 12:00", "SÁB 31/10": "3:00 pm - 6: 00 pm", "SÁB 14/11": "3:00 pm - 6: 00 pm", "DOM 06/12": "9:00 a.m. - 12:00" } },
+            { id: 14, nombre: "Cesar Quispe Lopez", programa: "Ingeniería Eléctrica", diario: "08:00 a.m. - 05:00 p.m.", horarios: { "SÁB 10/10": "9 am - 12 pm", "SÁB 24/10": "9 am - 12 pm", "SÁB 07/11": "9 am - 12 pm", "SÁB 21/11": "9 am - 12 pm", "SÁB 05/12": "9 am - 12 pm", "SÁB 19/12": "9 am - 12 pm" } },
+            { id: 15, nombre: "Lutsen Danino Antezana Gamarra", programa: "Ingeniería Civil", diario: "08:00 a.m. - 05:00 p.m.", horarios: { "SÁB 10/10": "2 pm - 5 pm", "SÁB 17/10": "2 pm - 5 pm", "SÁB 31/10": "2 pm - 5 pm", "SÁB 07/11": "2 pm - 5 pm", "SÁB 21/11": "2 pm - 5 pm", "SÁB 05/12": "2 pm - 5 pm", "DOM 06/12": "2 pm - 5 pm" } },
+            { id: 16, nombre: "Sandra Chavez Huamanchumo", programa: "Ingeniería de Sistemas e Informática", diario: "08:00 a.m. - 05:00 p.m.", horarios: {} },
+            { id: 17, nombre: "Dany Smith Rios Chanca", programa: "Arquitectura", diario: "08:00 a.m. - 05:00 p.m.", horarios: { "SÁB 17/10": "2:00pm a  3:30pm", "SÁB 24/10": "2:00pm a  3:30pm", "SÁB 31/10": "2:00pm a  3:30pm", "SÁB 07/11": "2:00pm a  3:30pm", "SÁB 14/11": "2:00pm a  3:30pm", "SÁB 21/11": "2:00pm a  3:30pm", "SÁB 28/11": "2:00pm a  3:30pm", "SÁB 05/12": "2:00pm a  3:30pm", "SÁB 12/12": "2:00pm a  3:30pm", "SÁB 19/12": "2:00pm a  3:30pm", "SÁB 26/12": "2:00pm a  3:30pm" } },
+            { id: 18, nombre: "Rubén Arzapalo Bello", programa: "Ingeniería Industrial", diario: "08:00 a.m. - 05:00 p.m.", horarios: { "DOM 04/10": "9 am - 12 pm", "DOM 18/10": "9 am - 12 pm", "DOM 01/11": "9 am - 12 pm", "DOM 15/11": "9 am - 12 pm" } },
+            { id: 19, nombre: "Nabilt Moggiano Aburto", programa: "Ingeniería Civil", diario: "08:00 a.m. - 05:00 p.m.", horarios: {} },
+            { id: 20, nombre: "Carlos Coaquira Rojo", programa: "Ingeniería Mecánica/Mecatrónica", diario: "08:00 a.m. - 05:00 p.m.", horarios: { "SÁB 03/10": "10 am - 1 pm", "SÁB 17/10": "10 am - 1 pm", "SÁB 31/10": "10 am - 1 pm", "SÁB 14/11": "10 am - 1 pm", "SÁB 28/11": "10 am - 1 pm", "SÁB 12/12": "10 am - 1 pm" } },
+            { id: 21, nombre: "Edgar Romero Pacheco", programa: "Ingeniería Mecánica/Mecatrónica", diario: "08:00 a.m. - 05:00 p.m.", horarios: { "SÁB 10/10": "9:30 am - 12:30 pm", "SÁB 24/10": "9:30 am - 12:30 pm", "SÁB 07/11": "9:30 am - 12:30 pm", "SÁB 21/11": "9:30 am - 12:30 pm", "SÁB 05/12": "9:30 am - 12:30 pm", "SÁB 19/12": "9:30 am - 12:30 pm" } }
+        ];
+
+        let registroAsistencia = {};
+        let fechaSeleccionada = fechasLista[0];
+
+        // Inicialización
+        window.addEventListener('DOMContentLoaded', () => {
+            // Cargar datos locales previamente guardados en este navegador si existen
+            const localSaved = localStorage.getItem('asistencia_facultad_db');
+            if (localSaved) {
+                try { registroAsistencia = JSON.parse(localSaved); } catch(e){}
+            }
+
+            poblarDesplegableFechas();
+            actualizarUIModo();
+            aplicarFiltros();
+        });
+
+        // Autenticación Admin
+        function autenticarAdmin() {
+            const pass = prompt("Ingrese la clave de Administrador para habilitar ediciones:");
+            if (pass === CLAVE_ADMIN) {
+                esAdmin = true;
+                actualizarUIModo();
+                aplicarFiltros();
+                alert("¡Sesión de Administrador iniciada correctamente!");
+            } else if (pass !== null) {
+                alert("❌ Clave incorrecta. Permaneces en Modo Visor.");
+            }
+        }
+
+        function cerrarSesionAdmin() {
+            esAdmin = false;
+            actualizarUIModo();
+            aplicarFiltros();
+        }
+
+        function actualizarUIModo() {
+            const badge = document.getElementById('badgeRol');
+            const btnLogin = document.getElementById('btnAdminLogin');
+            const btnLogout = document.getElementById('btnAdminLogout');
+            const lblCargar = document.getElementById('lblCargarExcel');
+
+            if (esAdmin) {
+                badge.className = "px-3 py-1.5 rounded-xl text-xs font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 flex items-center gap-1.5";
+                badge.innerHTML = "🔑 Modo Admin (Edición Activada)";
+                btnLogin.classList.add('hidden');
+                btnLogout.classList.remove('hidden');
+                lblCargar.classList.remove('hidden');
+            } else {
+                badge.className = "px-3 py-1.5 rounded-xl text-xs font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 flex items-center gap-1.5";
+                badge.innerHTML = "👁️ Modo Visor (Solo Lectura)";
+                btnLogin.classList.remove('hidden');
+                btnLogout.classList.add('hidden');
+                lblCargar.classList.add('hidden');
+            }
+        }
+
+        function poblarDesplegableFechas() {
+            const select = document.getElementById('selectFecha');
+            select.innerHTML = '';
+            fechasLista.forEach(fecha => {
+                const count = docentesData.filter(d => d.horarios[fecha]).length;
+                const option = document.createElement('option');
+                option.value = fecha;
+                option.textContent = `${fecha} (${count} programados)`;
+                select.appendChild(option);
+            });
+        }
+
+        function cambiarFecha() {
+            fechaSeleccionada = document.getElementById('selectFecha').value;
+            aplicarFiltros();
+        }
+
+        function aplicarFiltros() {
+            const query = document.getElementById('searchInput').value.toLowerCase();
+            const filterStatus = document.getElementById('filterStatus').value;
+            const soloProgramados = document.getElementById('checkSoloProgramados').checked;
+
+            let listaFiltrada = docentesData.filter(docente => {
+                const tieneClase = !!docente.horarios[fechaSeleccionada];
+                if (soloProgramados && !tieneClase) return false;
+
+                const coincideTexto = docente.nombre.toLowerCase().includes(query) || docente.programa.toLowerCase().includes(query);
+                
+                const key = `${docente.id}_${fechaSeleccionada}`;
+                const estadoActual = (registroAsistencia[key] && registroAsistencia[key].estado) ? registroAsistencia[key].estado : 'Pendiente';
+                
+                const coincideEstado = (filterStatus === 'todos') || (estadoActual === filterStatus);
+
+                return coincideTexto && coincideEstado;
+            });
+
+            renderizarTabla(listaFiltrada);
+            actualizarEstadisticas();
+        }
+
+        function renderizarTabla(lista) {
+            const tbody = document.getElementById('tablaCuerpo');
+            const mensajeVacio = document.getElementById('mensajeVacio');
+            tbody.innerHTML = '';
+
+            if (lista.length === 0) {
+                mensajeVacio.classList.remove('hidden');
+                return;
+            } else {
+                mensajeVacio.classList.add('hidden');
+            }
+
+            lista.forEach((docente, idx) => {
+                const tr = document.createElement('tr');
+                tr.className = "hover:bg-slate-50 transition border-b border-slate-100";
+
+                const key = `${docente.id}_${fechaSeleccionada}`;
+                const registro = registroAsistencia[key] || { estado: 'Pendiente', comentario: '' };
+
+                const horarioDelDia = docente.horarios[fechaSeleccionada];
+                const badgeHorario = horarioDelDia 
+                    ? `<span class="px-2.5 py-1 bg-indigo-50 border border-indigo-200 text-indigo-700 font-mono text-xs font-semibold rounded-md inline-block">⏰ ${horarioDelDia}</span>`
+                    : `<span class="px-2 py-0.5 bg-slate-100 text-slate-400 text-xs rounded inline-block">Sin programación</span>`;
+
+                let classEstado = "bg-slate-100 text-slate-700 border-slate-300";
+                if(registro.estado === 'Asistió') classEstado = "bg-emerald-100 text-emerald-800 border-emerald-300 font-bold";
+                else if(registro.estado === 'Tardanza') classEstado = "bg-amber-100 text-amber-800 border-amber-300 font-bold";
+                else if(registro.estado === 'Falta') classEstado = "bg-rose-100 text-rose-800 border-rose-300 font-bold";
+
+                // Atributos de restricción de edición para espectadores
+                const disabledAttr = esAdmin ? '' : 'disabled';
+                const readonlyAttr = esAdmin ? '' : 'readonly';
+
+                tr.innerHTML = `
+                    <td class="p-4 text-center font-bold text-slate-400 text-xs">${idx + 1}</td>
+                    <td class="p-4 font-semibold text-slate-900">${docente.nombre}</td>
+                    <td class="p-4 text-slate-600">${docente.programa}</td>
+                    <td class="p-4">${badgeHorario}</td>
+                    <td class="p-4 text-center">
+                        <select ${disabledAttr} onchange="guardarEstado(${docente.id}, this.value)" class="w-full p-2 text-xs rounded-xl border ${classEstado} focus:outline-none shadow-sm cursor-pointer disabled:opacity-85 disabled:cursor-not-allowed">
+                            <option value="Pendiente" ${registro.estado === 'Pendiente' ? 'selected' : ''}>⏳ Pendiente</option>
+                            <option value="Asistió" ${registro.estado === 'Asistió' ? 'selected' : ''}>✅ Asistió</option>
+                            <option value="Tardanza" ${registro.estado === 'Tardanza' ? 'selected' : ''}>⚠️️ Tardanza</option>
+                            <option value="Falta" ${registro.estado === 'Falta' ? 'selected' : ''}>❌ Falta / Ausente</option>
+                        </select>
+                    </td>
+                    <td class="p-4">
+                        <input type="text" 
+                            ${readonlyAttr}
+                            value="${registro.comentario || ''}" 
+                            placeholder="${!esAdmin ? 'Solo lectura' : (registro.estado === 'Tardanza' || registro.estado === 'Falta' ? 'Escribir motivo o justificación...' : 'Observación opcional...')}"
+                            onchange="guardarComentario(${docente.id}, this.value)"
+                            class="w-full p-2 text-xs border rounded-xl focus:ring-2 focus:ring-indigo-500 focus:outline-none disabled:bg-slate-50 disabled:text-slate-500 disabled:cursor-not-allowed ${registro.estado === 'Tardanza' || registro.estado === 'Falta' ? 'border-amber-400 bg-amber-50/50' : 'border-slate-300 bg-white'}"
+                        />
+                    </td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+
+        // Sincronizar datos modificados
+        function notificarCambioSincro() {
+            // Guardar localmente
+            localStorage.setItem('asistencia_facultad_db', JSON.stringify(registroAsistencia));
+
+            // Emitir por BroadcastChannel
+            broadcastChannel.postMessage({ registroAsistencia });
+
+            // Si Firebase está configurado, guardar en la nube
+            if (dbRef) {
+                dbRef.set(registroAsistencia);
+            }
+        }
+
+        function guardarEstado(docenteId, nuevoEstado) {
+            if (!esAdmin) return;
+            const key = `${docenteId}_${fechaSeleccionada}`;
+            if (!registroAsistencia[key]) {
+                registroAsistencia[key] = { estado: nuevoEstado, comentario: '' };
+            } else {
+                registroAsistencia[key].estado = nuevoEstado;
+            }
+            notificarCambioSincro();
+            aplicarFiltros();
+        }
+
+        function guardarComentario(docenteId, nuevoComentario) {
+            if (!esAdmin) return;
+            const key = `${docenteId}_${fechaSeleccionada}`;
+            if (!registroAsistencia[key]) {
+                registroAsistencia[key] = { estado: 'Pendiente', comentario: nuevoComentario };
+            } else {
+                registroAsistencia[key].comentario = nuevoComentario;
+            }
+            notificarCambioSincro();
+        }
+
+        function actualizarEstadisticas() {
+            const programados = docentesData.filter(d => d.horarios[fechaSeleccionada]);
+            
+            let countAsistio = 0, countTardanza = 0, countFalta = 0, countPendiente = 0;
+
+            programados.forEach(d => {
+                const key = `${d.id}_${fechaSeleccionada}`;
+                const est = registroAsistencia[key] ? registroAsistencia[key].estado : 'Pendiente';
+                if (est === 'Asistió') countAsistio++;
+                else if (est === 'Tardanza') countTardanza++;
+                else if (est === 'Falta') countFalta++;
+                else countPendiente++;
+            });
+
+            document.getElementById('statProgramados').textContent = programados.length;
+            document.getElementById('statAsistio').textContent = countAsistio;
+            document.getElementById('statTardanza').textContent = countTardanza;
+            document.getElementById('statFalta').textContent = countFalta;
+            document.getElementById('statPendiente').textContent = countPendiente;
+        }
+
+        function exportarReporteExcel() {
+            const dataToExport = [];
+
+            docentesData.forEach(d => {
+                fechasLista.forEach(f => {
+                    const tieneClase = d.horarios[f];
+                    const key = `${d.id}_${f}`;
+                    const reg = registroAsistencia[key] || { estado: 'Pendiente', comentario: '' };
+
+                    if (tieneClase || reg.estado !== 'Pendiente' || reg.comentario !== '') {
+                        dataToExport.push({
+                            "ID": d.id,
+                            "Docente": d.nombre,
+                            "Programa Académico": d.programa,
+                            "Fecha / Día": f,
+                            "Horario Programado": tieneClase || "No programado",
+                            "Estado Asistencia": reg.estado,
+                            "Comentarios / Observaciones": reg.comentario
+                        });
+                    }
+                });
+            });
+
+            if(dataToExport.length === 0) {
+                alert("No hay registros de asistencia para exportar.");
+                return;
+            }
+
+            const ws = XLSX.utils.json_to_sheet(dataToExport);
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, "Asistencias");
+
+            XLSX.writeFile(wb, `ASISTENCIA_FACULTAD_INGENIERIA_${fechaSeleccionada.replace('/', '-')}.xlsx`);
+        }
+
+        function cargarExcel(e) {
+            if (!esAdmin) return;
+            const file = e.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(evt) {
+                try {
+                    const data = new Uint8Array(evt.target.result);
+                    const workbook = XLSX.read(data, { type: 'array' });
+                    const sheet = workbook.Sheets[workbook.SheetNames[0]];
+                    const json = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+
+                    if(json.length > 1) {
+                        alert("¡Archivo Excel importado con éxito!");
+                        poblarDesplegableFechas();
+                        aplicarFiltros();
+                    }
+                } catch (err) {
+                    alert("Error al leer el archivo Excel.");
+                }
+            };
+            reader.readAsArrayBuffer(file);
+        }
+    </script>
+</body>
+</html>
